@@ -21,3 +21,8 @@ vendor/
 .claude/*
 .gradio/
 mac/out/
+.env
+.env.*
+.DS_Store
+*.log
+.venv-*/

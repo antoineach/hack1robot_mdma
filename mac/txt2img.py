@@ -11,8 +11,13 @@ from __future__ import annotations
 
 import argparse
 import gc
+import os
+import subprocess
 import time
 from pathlib import Path
+
+# le client Xet de huggingface_hub reste bloqué à 0 octet sur cette machine : HTTP classique
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 import torch
 from diffusers import ZImagePipeline
@@ -36,8 +41,13 @@ def main():
     ap.add_argument("--steps", type=int, default=8)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--gguf", nargs="?", const="z-image-turbo-Q8_0.gguf", default=None,
-                    help=f"fichier GGUF du transformer dans {GGUF_REPO}")
+                    help=f"fichier GGUF du transformer dans {GGUF_REPO} (auto si RAM <= 24 Go)")
+    ap.add_argument("--bf16", action="store_true", help="forcer le transformer bf16 complet (~12 Go)")
     a = ap.parse_args()
+    ram_gb = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"])) / 2**30
+    if a.gguf is None and not a.bf16 and ram_gb <= 24:
+        a.gguf = "z-image-turbo-Q8_0.gguf"
+        print(f"{ram_gb:.0f} Go de RAM : transformer GGUF {a.gguf} (--bf16 pour forcer le modèle complet)")
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     dtype = torch.bfloat16
@@ -69,10 +79,18 @@ def main():
     t2 = time.time()
     print(f"transformer chargé en {t2 - t1:.0f} s")
 
+    def sync(_pipe, _step, _t, kw):
+        # MPS est asynchrone : sans synchronisation la barre finit en 1 s et le calcul arrive après
+        if device == "mps":
+            torch.mps.synchronize()
+        return kw
+
+    print("débruitage (chaque pas prend environ une minute sur un M1)...")
     img = pipe(
         prompt_embeds=embeds, width=a.width, height=a.height,
         num_inference_steps=a.steps, guidance_scale=0.0,
         generator=torch.Generator("cpu").manual_seed(a.seed),
+        callback_on_step_end=sync,
     ).images[0]
     t3 = time.time()
 
