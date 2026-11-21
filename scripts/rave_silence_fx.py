@@ -1,8 +1,7 @@
 """Render the v5 rave/silence film from its MP4 and describe.py score.
 
-python scripts/rave_silence_fx.py source.mp4 description.md master.mp4
-ffmpeg -i master.mp4 -c:v libx264 -threads 4 -preset veryfast -crf 20 -maxrate 6400k -bufsize 9600k -c:a copy -movflags +faststart result.mp4
-Requires FFmpeg, OpenCV, NumPy, Pillow and the URW Base35 fonts.
+python scripts/rave_silence_fx.py source.mp4 description.md result.mp4
+Requires FFmpeg, OpenCV and NumPy.
 """
 import argparse
 import math
@@ -13,7 +12,6 @@ from pathlib import Path
 
 import cv2 as cv
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1280, 720
 # Art direction by phrase. Coordinates locate the optical centre within the shot.
@@ -46,14 +44,6 @@ def score(path):
         raise ValueError("Expected the 20 phrases of v5-mdma-etats-rave-silence")
     return shots
 
-def word_mask(word, serif):
-    name = "NimbusRoman-BoldItalic.otf" if serif else "NimbusSansNarrow-Bold.otf"
-    font = ImageFont.truetype("/usr/share/fonts/opentype/urw-base35/" + name, 260)
-    l, t, r, b = font.getbbox(word)
-    mask = Image.new("L", (r-l+6, b-t+6))
-    ImageDraw.Draw(mask).text((3-l, 3-t), word, font=font, fill=255)
-    return np.asarray(mask)
-
 def ink_ramp(colors):
     stops = [0, 42, 77, 109, 145, 190, 255]
     return np.column_stack([np.interp(np.arange(256), stops, [c[i] for c in colors])
@@ -80,36 +70,8 @@ def smooth(p):
     p = float(np.clip(p, 0, 1))
     return p*p*(3-2*p)
 
-def lettering(frame, glyph, cue, u, t, dose, idx):
-    end = idx == 19
-    visibility = smooth((u-.05)/.12) * (1 if end else smooth((.91-u)/.18))
-    if visibility < .01:
-        return frame
-    if end:
-        width = max(5, int(W*(.85-.84*smooth((u-.40)/.58))))
-    else:
-        width = int(W*(.50+.21*dose+.15*math.exp(-6*u)))
-    height = max(2, int(min(H*.43, width*glyph.shape[0]/glyph.shape[1]*1.34)))
-    glyph = cv.resize(glyph, (width,height), interpolation=cv.INTER_LINEAR)
-    cx = W//2 if end or idx%3==0 else int(W*(.44 if idx%3==1 else .57))
-    cy = int(H*(.50 if end or cue in ("aperture","iris") else (.73 if idx%2 else .32)))
-    left = int(np.clip(cx-width/2, 0, W-width))
-    top = int(np.clip(cy-height/2, 0, H-height))
-    region = frame[top:top+height,left:left+width]
-    if cue in ("prism","breath","fossil"):
-        edge = cv.subtract(cv.dilate(glyph,np.ones((5,5),np.uint8)),cv.erode(glyph,np.ones((3,3),np.uint8)))
-        interior = cv.bitwise_not(region)
-        region[glyph>130] = mix(region,interior,.67*visibility)[glyph>130]
-        mask = edge
-    else:
-        mask = glyph
-    color = (146,255,225) if idx in (1,2,6,18) else (212,236,251)
-    region[mask>110] = mix(region, np.full_like(region,color), visibility*.96)[mask>110]
-    return frame
-
 def render(source, description, output):
     shots = score(description)
-    glyphs = [word_mask(word, kind in ("breath","fossil","aperture")) for kind,word,_,_ in CUES]
     cap = cv.VideoCapture(str(source))
     fps = cap.get(cv.CAP_PROP_FPS)
     if not cap.isOpened() or fps != 30:
@@ -120,7 +82,7 @@ def render(source, description, output):
     past = deque(maxlen=12)
     cmd = ["ffmpeg","-v","error","-y","-f","rawvideo","-pixel_format","bgr24","-video_size",f"{W}x{H}",
            "-framerate",str(fps),"-i","-","-i",str(source),"-map","0:v","-map","1:a","-c:a","copy","-c:v",
-           "libx264","-threads","4","-preset","veryfast","-crf","20","-pix_fmt","yuv420p","-movflags","+faststart",str(output)]
+           "libx264","-threads","4","-preset","veryfast","-crf","20","-maxrate","6400k","-bufsize","9600k","-pix_fmt","yuv420p","-movflags","+faststart",str(output)]
     idx = frame_no = 0
     with subprocess.Popen(cmd,stdin=subprocess.PIPE) as encoder:
         while True:
@@ -132,7 +94,7 @@ def render(source, description, output):
                 idx += 1
             start,end,dose,_ = shots[idx]
             u = min(1,(t-start)/(end-start))
-            kind,word,ax,ay = CUES[idx]
+            kind,_,ax,ay = CUES[idx]
             v = float(energy[min(frame_no,len(energy)-1)])
             src = cv.resize(raw,(W,H),interpolation=cv.INTER_AREA)
             past.append(src)
@@ -194,7 +156,6 @@ def render(source, description, output):
             border = smooth(min(u/.065,(1-u)/.055))
             if idx != 19 and border < 1:
                 frame = mix(frame,palette(src,ICE),.47*(1-border))
-            frame = lettering(frame,glyphs[idx],kind,u,t,dose,idx)
             if t > shots[-1][1]:
                 frame = cv.convertScaleAbs(frame,alpha=max(0,1-(t-shots[-1][1])/.60))
             encoder.stdin.write(frame.tobytes())
