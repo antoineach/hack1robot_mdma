@@ -41,8 +41,8 @@ Depuis `sana_deforum/` :
 python sana_deforum_test.py --settings ../FovVid1CompSettings.txt --frames 6 --W 512 --H 288 \
   --prompt "A surreal dreamlike oil painting, a visual metaphor of silence, memory, ocean"
 
-# 2. Premier vrai rendu : 5 s à 15 i/s
-python sana_deforum_test.py --settings ../FovVid1CompSettings.txt --frames 75 --W 768 --H 432 \
+# 2. Premier vrai rendu : 5 s à 15 i/s, en 1024x576 (proche de la résolution d'entraînement de Sana)
+python sana_deforum_test.py --settings ../FovVid1CompSettings.txt --frames 75 --W 1024 --H 576 \
   --prompt "A surreal dreamlike oil painting, a visual metaphor of silence, memory, ocean"
 
 # 3. Changement de prompt en cours de route (transition par mélange d'embeddings sur --prompt-blend images)
@@ -64,6 +64,8 @@ Les sorties vont dans `out_sana_deforum/<horodatage>/` :
 4. **`--strength-mode`** : `angle` (défaut) injecte le bruit à l'angle θ = (1 − strength)·π/2, ce qui donne une force continue avec 2 pas. `steps` utilise le mécanisme standard de diffusers, arrondi par paliers de 1/`--steps`. Compare-les à strength égale.
 5. **`--big`** : transformer 1.6B au lieu de 0.6B (plus lent, peut-être plus net).
 6. **`--color`** : 0 à 1, dosage de la correction des couleurs sur l'image 0. Mets 0 si les couleurs se figent trop.
+7. **`--noise`** : bruit ajouté avant chaque diffusion (0,065 dans le réglage). Sur Mac, il s'accumule en grain visible dans les zones unies au bout de quelques diffusions. Essaie 0,02 et 0.
+8. **Taille** : reste entre 768 et 1024 px de large. En 512×288, Sana-Sprint perd nettement en qualité (image grossière, moins picturale).
 
 ## Ce qu'il faut rapporter
 
@@ -82,7 +84,15 @@ Pour chaque run, au minimum :
 - **Mémoire :** l'encodeur de texte (~5 Go) est libéré une fois tous les prompts encodés. On ne peut donc pas ajouter de prompt pendant la boucle : il faut tout passer au départ.
 - **Dimensions :** W et H sont arrondis au multiple de 32 inférieur (432 devient 416).
 - **Le mode `angle` est une extrapolation.** Sana-Sprint est distillé pour partir de θ = π/2 (bruit pur). Démarrer plus bas devrait marcher, puisque c'est ce que fait l'img2img de diffusers, mais ce n'est validé que sur un test de 6 images. Si les images sortent délavées ou grises, compare avec `--strength-mode steps --steps 4`.
-- **Mesures sur le Mac M1 16 Go**, à titre de repère, modèle 0.6B en 512×288, cadence 2 : **85 s par diffusion** avec l'encodeur de texte encore chargé (pic à 12,6 Go). L'effet de sa libération reste à confirmer. Sur un GPU, on s'attend à quelques secondes, voire moins d'une seconde, par diffusion.
+- **Résolution :** le script désactive `use_resolution_binning` (option `--binning` pour le réactiver). Activé, diffusers recalcule toute taille vers ~1024 px, puis redimensionne. Sur Mac, ça faisait passer une diffusion de 2,4 s à 105 s en 512×288.
+- **Mesures de référence sur le Mac M1 16 Go** (modèle 0.6B, bf16, MPS, cadence 2, strength 0,675 en mode `angle`) :
+
+  | Taille | s / diffusion | s / image vidéo | Pic mémoire |
+  |---|---|---|---|
+  | 512×288 | 2,4 | ~1,1 | 3,7 Go |
+  | 1024×576 | 8,8 | 4,9 | 5,8 Go |
+
+  À ces vitesses, 5 s de vidéo en 1024×576 (75 images, ~37 diffusions) prennent environ 6 min sur le Mac. Le chargement et l'encodage des prompts ajoutent ~1 min, une seule fois. Un GPU devrait faire nettement mieux. C'est ce qu'il faut mesurer.
 
 ## À ne pas faire
 

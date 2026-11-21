@@ -161,6 +161,8 @@ def match_lab(img_t, ref_lab, w):
 
 # ----------------------------------------------------------------------------- Sana
 class Sana:
+    binning = False  # True : diffusers ramène W x H à une résolution standard ~1024 px (bien plus lent en petite taille)
+
     def __init__(self, big, dev, dtype):
         from diffusers import SanaSprintImg2ImgPipeline, SanaSprintPipeline, SanaTransformer2DModel
         kw = {} if big else {"transformer": SanaTransformer2DModel.from_pretrained(REPO_06, subfolder="transformer", torch_dtype=dtype)}
@@ -207,14 +209,15 @@ class Sana:
     def text2img(self, emb, W, H, gen):
         e, m = emb
         return self.t2i(prompt_embeds=e, prompt_attention_mask=m, width=W, height=H, num_inference_steps=2,
-                        generator=gen, output_type="pt").images
+                        generator=gen, output_type="pt", use_resolution_binning=self.binning).images
 
     @torch.no_grad()
     def img2img(self, img_t, emb, keep, W, H, gen, mode, steps):
         """img_t : [1,3,H,W] 0..1. keep = strength Deforum (part gardée). Renvoie (image, force effective débruitée)."""
         e, m = emb
         denoise = float(np.clip(1.0 - keep, 0.02, 1.0))
-        kw = dict(image=img_t, prompt_embeds=e, prompt_attention_mask=m, width=W, height=H, generator=gen, output_type="pt")
+        kw = dict(image=img_t, prompt_embeds=e, prompt_attention_mask=m, width=W, height=H, generator=gen, output_type="pt",
+                  use_resolution_binning=self.binning)
         if mode == "angle":
             theta = denoise * math.pi / 2
             out = self.i2i(strength=1.0, num_inference_steps=2, max_timesteps=theta,
@@ -248,11 +251,15 @@ def main():
     ap.add_argument("--fps", type=int, default=15)
     ap.add_argument("--cadence", type=int, default=None, help="diffusion toutes les N images (défaut : réglage)")
     ap.add_argument("--strength", type=float, default=None, help="force Deforum fixe (part gardée), remplace le réglage")
+    ap.add_argument("--noise", type=float, default=None, help="bruit ajouté avant chaque diffusion, remplace noise_schedule "
+                    "(0.065 dans le réglage ; s'accumule en grain si trop fort)")
     ap.add_argument("--strength-mode", choices=["angle", "steps"], default="angle")
     ap.add_argument("--steps", type=int, default=4, help="pas de débruitage en mode steps")
     ap.add_argument("--z-scale", type=float, default=1.0, help="facteur sur translation_z")
     ap.add_argument("--color", type=float, default=1.0, help="dosage de la correction couleur sur l'image 0 (0 = non)")
     ap.add_argument("--big", action="store_true", help="transformer 1.6B au lieu de 0.6B")
+    ap.add_argument("--binning", action="store_true",
+                    help="laisser diffusers calculer à une résolution standard ~1024 px puis redimensionner (lent, peut-être plus net)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--device", default=None)
     ap.add_argument("--out", default=None)
@@ -268,6 +275,8 @@ def main():
     if a.strength is not None:
         keeps[:] = a.strength
     noises, contrasts = sched("noise_schedule", "0:(0.0)"), sched("contrast_schedule", "0:(1.0)")
+    if a.noise is not None:
+        noises[:] = a.noise
     cadence = max(1, int(a.cadence or float(settings.get("diffusion_cadence", 1))))
     use_color = a.color > 0 and str(settings.get("color_coherence", "")).lower() not in ("none", "", "false")
     pk = prompt_keys(a, settings)
@@ -282,6 +291,7 @@ def main():
 
     T = {"load": 0.0, "encode": 0.0, "depth": 0.0, "warp": 0.0, "diffuse": 0.0, "color": 0.0}
     t0 = time.time()
+    Sana.binning = a.binning
     sana, depth = Sana(a.big, dev, dtype), Depth(dev)
     warp = Warper(W, H, dev)
     sync(dev); T["load"] = time.time() - t0
