@@ -99,6 +99,15 @@ video: {target_duration_s: 60}
 
 Résultats dans `runs/<id>/` : `trace.json` (mots par couche et par token), `windows.json`, `frames/`, `audio/`, `out_<mode>.mp4`, `out.mp4`, `config.yaml` (configuration résolue), `log.txt` et `timings.json`. Le rendu prend environ 7 min par minute de vidéo sur une A6000.
 
+Pour essayer une transition visuelle sur un run existant, relance uniquement le montage.
+
+```bash
+./run.sh assemble --run runs/<id> --transition zoom
+./run.sh assemble --run runs/<id> --transition prism
+```
+
+`zoom` superpose un zoom centré au fondu. `prism` ajoute un décalage des canaux rouge et bleu. Ces exports portent le suffixe de l'effet, par exemple `out_voix_prism.mp4`. Pour utiliser l'effet dans un rendu complet, règle `video.transition` dans la configuration du run. Le fondu classique (`dissolve`) est le choix par défaut. Les effets s'inscrivent dans la durée de `video.crossfade_s`, raccourcie si deux images sont rapprochées, et conservent le minutage audio.
+
 ### Interface web
 
 ```bash

@@ -47,6 +47,7 @@ video:
   fps: 30
   min_duration_s: 2.0
   crossfade_s: 0.8
+  transition: dissolve      # dissolve | zoom | prism (image uniquement)
   width: 1920
   height: 1080
   target_duration_s: 60     # durée globale visée (approx.) ; null = une tranche tous les windows.stride tokens

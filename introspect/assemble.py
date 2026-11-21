@@ -15,6 +15,7 @@ from scipy.signal import resample_poly
 from .common import Log, run_config
 
 SR = 44100
+TRANSITIONS = ("dissolve", "zoom", "prism")
 
 
 def ffmpeg_bin() -> str:
@@ -45,6 +46,32 @@ def fit(img: Image.Image, W: int, H: int) -> np.ndarray:
     im = img.resize((round(img.width * s), round(img.height * s)), Image.LANCZOS)
     l, t = (im.width - W) // 2, (im.height - H) // 2
     return np.asarray(im.crop((l, t, l + W, t + H)).convert("RGB"))
+
+
+def transition_frame(left: np.ndarray, right: np.ndarray, progress: float, style: str) -> bytes:
+    if style == "dissolve":
+        frame = left * (1 - progress) + right * progress
+        return np.clip(frame, 0, 255).astype(np.uint8).tobytes()
+
+    # Le zoom culmine à la coupe et retombe sans saut sur l'image fixe.
+    alpha = progress * progress * (3 - 2 * progress)
+    pulse = 4 * alpha * (1 - alpha)
+    frame = (left * (1 - alpha) + right * alpha).astype(np.uint8)
+    height, width = frame.shape[:2]
+    zoom = 1 + 0.16 * pulse
+    dx, dy = width * (1 - 1 / zoom) / 2, height * (1 - 1 / zoom) / 2
+    image = Image.fromarray(frame).resize(
+        (width, height), Image.BICUBIC, box=(dx, dy, width - dx, height - dy)
+    )
+    if style == "prism":
+        shift = round(width * 0.012 * pulse)
+        if shift:
+            frame = np.asarray(image).copy()
+            columns = np.arange(width)
+            frame[:, :, 0] = frame[:, np.clip(columns - shift, 0, width - 1), 0]
+            frame[:, :, 2] = frame[:, np.clip(columns + shift, 0, width - 1), 2]
+            return frame.tobytes()
+    return image.tobytes()
 
 
 def durations(run_dir: Path, cfg: dict, n: int) -> list[float]:
@@ -178,16 +205,20 @@ def build_audio(run_dir: Path, cfg: dict, mode: str, durs: list[float]) -> np.nd
     return mix
 
 
-def assemble(run_dir: Path, cfg: dict | None = None, mode: str | None = None, raw_voice: bool = False) -> Path:
+def assemble(run_dir: Path, cfg: dict | None = None, mode: str | None = None, raw_voice: bool = False,
+             transition: str | None = None) -> Path:
     run_dir = Path(run_dir)
     cfg = cfg or run_config(run_dir)
     mode = mode or cfg["sound"]["mode"]
-    suffix = ""
+    vc = cfg["video"]
+    style = transition if transition is not None else vc.get("transition", "dissolve")
+    if style not in TRANSITIONS:
+        raise ValueError(f"Transition inconnue : {style!r} (choix : {', '.join(TRANSITIONS)})")
+    suffix = f"_{style}" if transition is not None else ""
     if raw_voice:
         cfg["sound"]["voice_fx"]["enabled"] = False
-        suffix = "_brute"
-    log = Log(run_dir, f"assemble_{mode}")
-    vc = cfg["video"]
+        suffix = "_brute" + suffix
+    log = Log(run_dir, f"assemble_{mode}{suffix}")
     W, H, fps, c = vc.get("width", 1920), vc.get("height", 1080), vc["fps"], vc["crossfade_s"]
     wins = json.loads((run_dir / "windows.json").read_text())
     n = len(wins)
@@ -229,18 +260,19 @@ def assemble(run_dir: Path, cfg: dict | None = None, mode: str | None = None, ra
            "-i", "-", "-i", str(wav_path), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "192k", "-shortest", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    half = c / 2
+    if style == "dissolve":
+        half_widths = [c / 2] * (len(shots) - 1)
+    else:
+        # Au plus une demi-image de part et d'autre, même avec plusieurs images par tranche.
+        half_widths = [min(c, left[1], right[1]) / 2 for left, right in zip(shots, shots[1:])]
     static: dict[str, bytes] = {}
     for fi in range(nframes):
         t = fi / fps
         i = min(len(shots) - 1, int(np.searchsorted(starts, t, side="right") - 1))
-        # fondu : autour de chaque frontière, de t_b - c/2 à t_b + c/2
-        if i + 1 < len(shots) and t > starts[i + 1] - half:
-            a = (t - (starts[i + 1] - half)) / c
-            frame = get(shots[i][0]) * (1 - a) + get(shots[i + 1][0]) * a
-        elif i > 0 and t < starts[i] + half:
-            a = 0.5 + (t - starts[i]) / c
-            frame = get(shots[i - 1][0]) * (1 - a) + get(shots[i][0]) * a
+        if i + 1 < len(shots) and t > starts[i + 1] - half_widths[i]:
+            boundary = i + 1
+        elif i > 0 and t < starts[i] + half_widths[i - 1]:
+            boundary = i
         else:
             f = shots[i][0]
             if f not in static:
@@ -248,7 +280,9 @@ def assemble(run_dir: Path, cfg: dict | None = None, mode: str | None = None, ra
                 static[f] = np.clip(get(f), 0, 255).astype(np.uint8).tobytes()
             proc.stdin.write(static[f])
             continue
-        proc.stdin.write(np.clip(frame, 0, 255).astype(np.uint8).tobytes())
+        half = half_widths[boundary - 1]
+        progress = 0.5 + (t - starts[boundary]) / (2 * half)
+        proc.stdin.write(transition_frame(get(shots[boundary - 1][0]), get(shots[boundary][0]), progress, style))
     proc.stdin.close()
     if proc.wait() != 0:
         raise RuntimeError("ffmpeg a échoué")
@@ -264,8 +298,9 @@ def main(argv=None):
     ap.add_argument("--run", required=True)
     ap.add_argument("--mode", choices=["voix", "sonorisation", "mixte"])
     ap.add_argument("--raw-voice", action="store_true", help="voix brute, sans effets")
+    ap.add_argument("--transition", choices=TRANSITIONS, help="export de comparaison avec une transition visuelle")
     a = ap.parse_args(argv)
-    assemble(Path(a.run), mode=a.mode, raw_voice=a.raw_voice)
+    assemble(Path(a.run), mode=a.mode, raw_voice=a.raw_voice, transition=a.transition)
 
 
 if __name__ == "__main__":
