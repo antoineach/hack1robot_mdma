@@ -26,3 +26,5 @@ mac/out/
 .DS_Store
 *.log
 .venv-*/
+out_sana_deforum/
+.venv*/
