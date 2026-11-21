@@ -137,6 +137,18 @@ class DeforumMotion:
         return tz, (rx, ry, rz), float(self.fov[i1])
 
 
+def color_match(arr: np.ndarray, ref: np.ndarray, w: float) -> np.ndarray:
+    """Transfert de moyenne et d'écart-type par canal en YCbCr (proche du `color_coherence` de Deforum),
+    dosé par w."""
+    if w <= 0:
+        return arr
+    a = np.asarray(Image.fromarray(arr).convert("YCbCr"), np.float32)
+    r = np.asarray(Image.fromarray(ref).convert("YCbCr"), np.float32)
+    m = (a - a.mean((0, 1))) / (a.std((0, 1)) + 1e-6) * r.std((0, 1)) + r.mean((0, 1))
+    out = np.clip(a * (1 - w) + m * w, 0, 255).astype(np.uint8)
+    return np.asarray(Image.fromarray(out, "YCbCr").convert("RGB"))
+
+
 def keyframes(run_dir: Path, durs: list[float]) -> list[dict]:
     """Images clés dans l'ordre : toutes les images d'une tranche (frames.json, clé `sub`) se partagent
     sa durée à parts égales."""
@@ -164,7 +176,11 @@ def main():
     ap.add_argument("--roll", type=float, default=4.0, help="rotation autour de l'axe de visée par image clé (degrés)")
     ap.add_argument("--yaw", type=float, default=3.0)
     ap.add_argument("--xfade", type=float, default=1.6, help="transition entre deux tranches (s)")
-    ap.add_argument("--sub-xfade", type=float, default=0.6, help="transition entre images d'une même tranche (s)")
+    ap.add_argument("--sub-xfade", type=float, default=0.9, help="transition entre images d'une même tranche (s)")
+    ap.add_argument("--emerge", type=float, default=0.3,
+                    help="taille de l'image suivante quand elle apparaît au centre (fraction de l'écran)")
+    ap.add_argument("--color-coherence", type=float, default=0.6,
+                    help="rapproche les couleurs de chaque image clé de la précédente (0 = non, 1 = copie la palette)")
     ap.add_argument("--deforum", default=None, help="réglage Deforum (JSON) : reprend translation_z, rotation_3d_*, fov_schedule")
     ap.add_argument("--z-scale", type=float, default=1.0, help="facteur sur translation_z du réglage Deforum")
     ap.add_argument("--cycle-fps", type=float, default=None,
@@ -190,8 +206,9 @@ def main():
         total = min(total, a.seconds)
     K = [kf for kf in K if kf["start"] < total + a.xfade]
     starts = np.array([kf["start"] for kf in K])
-    # demi-durée de la transition qui précède chaque image clé (longue si elle ouvre une tranche)
-    halves = [0.0] + [(a.xfade if K[i]["sub"] == 0 else min(a.sub_xfade, K[i]["dur"] * 0.8)) / 2 for i in range(1, len(K))]
+    # durée pendant laquelle chaque image clé émerge au centre de la précédente, avant son début
+    # (longue si elle ouvre une tranche, jamais plus de 85 % de la durée de la précédente)
+    lead = [0.0] + [min(a.xfade if K[i]["sub"] == 0 else a.sub_xfade, K[i - 1]["dur"] * 0.85) for i in range(1, len(K))]
     motion = DeforumMotion(Path(a.deforum), fps, total + a.xfade, a.z_scale, a.cycle_fps) if a.deforum else None
     if motion:
         log("mouvement Deforum :", motion.desc)
@@ -204,8 +221,12 @@ def main():
     dp = pipeline("depth-estimation", model=DEPTH_MODEL, device=dev)
     keys, depths = [], []
     t0 = time.time()
+    prev = None
     for kf in K:
         arr = fit(Image.open(run_dir / "frames" / kf["file"]).convert("RGB"), W, H)
+        if prev is not None:
+            arr = color_match(arr, prev, a.color_coherence)
+        prev = arr
         keys.append(torch.from_numpy(arr).to(dev).permute(2, 0, 1)[None].float() / 255)
         depths.append(torch.from_numpy(depth_map(dp, Image.fromarray(arr), W, H)).to(dev))
     del dp
@@ -220,6 +241,7 @@ def main():
     cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     warp = Warper(W, H, dev)
+    cards: dict = {}
     nframes = int(total * fps)
     t0 = time.time()
     with torch.no_grad():
@@ -227,30 +249,47 @@ def main():
             t = fi / fps
             i = max(0, min(len(K) - 1, int(np.searchsorted(starts, t, side="right") - 1)))
 
-            def view(j):
+            def view(j, at=None):
+                tt = t if at is None else at
                 if motion:
-                    tz, (rx, ry, rz), fov = motion.pose(K[j]["start"] - halves[j], t)
+                    tz, (rx, ry, rz), fov = motion.pose(K[j]["start"], tt)
                 else:
-                    tz, (rx, ry, rz), fov = camera(t - K[j]["start"], K[j]["dur"], j, a, unit, halves[j])
+                    tz, (rx, ry, rz), fov = camera(tt - K[j]["start"], K[j]["dur"], j, a, unit, 0.0)
                 fov = math.degrees(2 * math.atan(math.tan(math.radians(fov) / 2) / overscan))
                 return warp(keys[j], depths[j], tz, rot(rx, ry, rz, dev), fov_src, fov)
 
             frame = view(i)
-            # transition autour de la frontière la plus proche (fin de i ou début de i)
-            for j_from, j_to in ((i, i + 1), (i - 1, i)):
-                if j_from < 0 or j_to >= len(K):
-                    continue
-                tb, h = K[j_to]["start"], halves[j_to]
-                if abs(t - tb) >= h:
-                    continue
-                x = (t - (tb - h)) / (2 * h)  # 0 -> 1 sur la transition
-                A = view(j_from) if j_from != i else frame
-                B = view(j_to) if j_to != i else frame
-                far = (depths[j_from] - 1) / (depths[j_from].max() - 1 + 1e-6)  # 0 proche, 1 loin
-                alpha = (x * 1.6 - (1 - far) * 0.6).clamp(0, 1)  # le fond de A cède d'abord
-                alpha = alpha * alpha * (3 - 2 * alpha)
-                frame = A * (1 - alpha) + B * alpha
-                break
+            # zoom infini : l'image clé suivante apparaît petite au centre (là où l'on va) et grandit au rythme
+            # de l'avance jusqu'à remplir l'écran à son début ; on ne recule jamais
+            j = i + 1
+            if j < len(K) and t >= K[j]["start"] - lead[j]:
+                L, t_end = lead[j], K[j]["start"]
+                p = min(1.0, max(0.0, (t - (t_end - L)) / L))  # 0 -> 1 pendant l'émergence
+                s0 = a.emerge
+                sc = 1.0 / (1.0 + (1.0 / s0 - 1.0) * (1.0 - p))  # perspective : s0 -> 1
+                if j not in cards:
+                    cards.clear()
+                    cards[j] = view(j, at=K[j]["start"])  # B tel qu'il sera à son début
+                gx, gy = warp.u / ((W - 1) / 2) / sc, warp.v / ((H - 1) / 2) / sc
+                card = F.grid_sample(cards[j], torch.stack([gx, gy], -1)[None], mode="bilinear",
+                                     padding_mode="reflection", align_corners=True)
+                # masque radial doux (pas de rectangle) : large au début, se resserre sur les bords à la fin
+                rr = torch.sqrt(gx * gx + gy * gy)  # ellipse : 0 au centre, 1 au milieu des bords de B
+                f = 0.9 * (1.0 - p) + 0.05
+                m = ((1 - rr) / f).clamp(0, 1)
+                m = m * m * (3 - 2 * m)
+                cover = min(1.0, max(0.0, (p - 0.8) / 0.2))  # à la fin, B couvre tout l'écran
+                m = torch.maximum(m, torch.full_like(m, cover * cover * (3 - 2 * cover)))
+                # jamais hors de la surface de B (sinon on voit ses bords étirés)
+                inside = ((1 - torch.maximum(gx.abs(), gy.abs())) / 0.15).clamp(0, 1)
+                inside = inside * inside * (3 - 2 * inside)
+                m = m * inside
+                # B commence derrière les objets proches de A : il ne perce d'abord que là où A est lointain
+                far = (depths[i] - 1) / (depths[i].max() - 1 + 1e-6)
+                m = m * ((far - (1 - 1.4 * p)) / 0.25 + 0.5).clamp(0, 1)
+                fade = min(1.0, p / 0.35)
+                m = m * fade * fade * (3 - 2 * fade)
+                frame = frame * (1 - m) + card * m
             px = (frame[0].clamp(0, 1) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             proc.stdin.write(px.tobytes())
             if fi % (fps * 5) == 0:
