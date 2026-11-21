@@ -108,6 +108,26 @@ Pour essayer une transition visuelle sur un run existant, relance uniquement le 
 
 `zoom` superpose un zoom centré au fondu. `prism` ajoute un décalage des canaux rouge et bleu. Ces exports portent le suffixe de l'effet, par exemple `out_voix_prism.mp4`. Pour utiliser l'effet dans un rendu complet, règle `video.transition` dans la configuration du run. Le fondu classique (`dissolve`) est le choix par défaut. Les effets s'inscrivent dans la durée de `video.crossfade_s`, raccourcie si deux images sont rapprochées, et conservent le minutage audio.
 
+### Postproduction d’un MP4 avec sa fiche Markdown
+
+```bash
+python scripts/rave_silence_fx.py film.mp4 fiche.md film-effets.mp4
+```
+
+Le script utilise FFmpeg, ffprobe, OpenCV et NumPy. Chaque titre de tranche indique le début et la fin dans le temps du MP4. Les fiches de `describe.py` et les fiches courtes comme celle-ci sont prises en charge.
+
+```markdown
+### 0:00 → 0:04
+- **Paroles** : « Une lueur passe dans le verre. »
+- **Drogue** : phase « Montée », force perçue d = 0.35
+
+### 0:04 → 0:10
+- **Paroles** : « Un écho traverse la rue. »
+- **Drogue** : phase « Descente », force perçue d = 0.70
+```
+
+Les intervalles doivent être chronologiques et sans chevauchement. Les mots des paroles choisissent le motif dans un lexique français/anglais. Les poids J-lens facultatifs départagent les motifs et peuvent en déclencher un si un mot latent domine. Le dosage est interpolé entre tranches (0,55 par défaut). Les effets apparaissent à l’intérieur des intervalles, avec des pauses. Le script conserve les proportions du film, copie sa première piste audio si elle existe et rend aussi les MP4 muets. Les vidéos à cadence variable sont converties à leur cadence moyenne.
+
 ### Interface web
 
 ```bash

@@ -1,50 +1,117 @@
-"""Render the v5 rave/silence film from its MP4 and describe.py score.
+"""Render a film using timecoded Markdown cues, optional J-lens weights and drug intensity.
 
 python scripts/rave_silence_fx.py source.mp4 description.md result.mp4
 Requires FFmpeg, OpenCV and NumPy.
 """
 import argparse
+import json
 import math
 import re
 import subprocess
+import tempfile
+import unicodedata
 from collections import deque
+from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 import cv2 as cv
 import numpy as np
 
-W, H = 1280, 720
-# Art direction by phrase. Coordinates locate the optical centre within the shot.
-CUES = [
-    ("pulse", "SHIMMERING", .35, .47), ("tear", "TREMBLING", .44, .52),
-    ("tear", "BRUTAL", .47, .52), ("breath", "BREATHE", .50, .43),
-    ("breath", "EXHALE", .52, .46), ("choir", "PARLER", .51, .50),
-    ("tear", "CHAOS", .50, .45), ("aperture", "SILENCE", .51, .46),
-    ("prism", "COMUNICACIÓN", .50, .48), ("prism", "UNGLAUBLICH", .50, .48),
-    ("iris", "ÉNORME", .50, .50), ("iris", "GIGANTIC", .47, .48),
-    ("echo", "CLINGS", .50, .52), ("boxes", "CRATES", .47, .49),
-    ("boxes", "WAREHOUSES", .5, .52), ("fossil", "SEASHELLS", .34, .72),
-    ("stone", "BÉTON", .51, .55), ("fossil", "FOSSILS", .39, .69),
-    ("tear", "LOUDNESS", .5, .53), ("aperture", "SILENCE", .51, .51),
-]
+@dataclass
+class Shot:
+    start: float
+    end: float
+    dose: float
+    phase: str
+    comedown: float
+    crash: float
+    effect: str
+    confidence: float
 
-def timing(value):
-    minutes, seconds = value.split(":")
-    return 60 * int(minutes) + float(seconds)
+
+# Matching runs on whole words. Phrases take precedence over latent words.
+WORDS = {
+    "tear": "brutal brutale chaos fracture rupture",
+    "breath": "exhale expire expiration éther",
+    "prism": "comunicación communication réseau prisme prism",
+    "iris": "énorme gigantic géant immense immenseur expansion",
+    "fossil": "seashells coquillages fossiles fossils",
+    "halation": "breathe respire respiration lueur halo étincelle étincelles",
+    "portal": "incroyable vertige vortex abîme tunnel",
+    "echo": "clings écho echo rémanence reflet reflets",
+}
+
+def normalize(text):
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold())
+                   if not unicodedata.combining(c))
+
+def tokens(text):
+    return set(re.findall(r"[^\W_]+", normalize(text)))
+
+VOCABULARY = {effect: tokens(words) for effect, words in WORDS.items()}
+TIMECODE = r"(?:\d+:)?\d+:\d{2}(?:[.,]\d+)?"
+HEADING = re.compile(rf"^#{{1,6}}[^\n]*?({TIMECODE})\s*(?:→|->|–|—|-)\s*({TIMECODE}).*$", re.M)
+
+def seconds(text):
+    total = 0.
+    for field in text.replace(",", ".").split(":"):
+        total = 60 * total + float(field)
+    return total
+
+def choose_effect(phrase, weights):
+    spoken = tokens(phrase)
+    candidates = []
+    for effect, family in VOCABULARY.items():
+        overlap = family & spoken
+        latent = max((weights.get(w, 0.) for w in family), default=0.)
+        if overlap:
+            candidates.append((1 + latent, effect, min(1., .8 + latent)))
+        elif latent >= .18:
+            candidates.append((latent, effect, min(.65, 2 * latent)))
+    if candidates:
+        _, effect, confidence = max(candidates)
+        return effect, confidence
+    return "", 0.
 
 def score(path):
+    text = path.read_text(encoding="utf-8")
+    headers = list(HEADING.finditer(text))
+    if not headers:
+        raise ValueError("Expected Markdown headings with start and end times, e.g. ### 0:00 → 0:04")
     shots = []
-    for section in re.split(r"^### Image ", path.read_text().strip(), flags=re.M)[1:]:
-        start, end = re.search(r"(\d+:\d+\.\d+) → (\d+:\d+\.\d+)", section).groups()
-        dose = float(re.search(r"force perçue d = ([\d.]+)", section)[1])
-        phrase = re.search(r"\*\*Paroles\*\* : « (.*?) »", section)[1]
-        drug = re.search(r"^- \*\*Drogue\*\* : phase « (.*?) »(.*)$", section, re.M)
-        shares = dict(re.findall(r"mdma_(\w+) (\d+)%", drug[2]))
-        shots.append((timing(start), timing(end), dose, phrase, drug[1],
-                      int(shares.get("comedown", 0))/100, int(shares.get("crash", 0))/100))
-    if len(shots) != len(CUES) or any(cue[1].casefold() not in shot[3].casefold()
-                                       for cue, shot in zip(CUES, shots)):
-        raise ValueError("Expected the 20 phrases of v5-mdma-etats-rave-silence")
+    last_used = {}
+    for i, heading in enumerate(headers):
+        section = text[heading.end():headers[i+1].start() if i+1 < len(headers) else len(text)]
+        start, end = map(seconds, heading.groups())
+        if end <= start or (shots and start < shots[-1].end - .001):
+            raise ValueError(f"Invalid or overlapping interval at {heading.group()}")
+        plain = section.replace("**", "")
+        spoken = re.search(r"^[- *]*Paroles\s*:\s*(.+)$", plain, re.M | re.I)
+        phrase = spoken[1].split("»")[0] if spoken else " ".join(
+            line for line in plain.splitlines() if ":" not in line)
+        jlens = re.search(r"^[- *]*Mots lus[^\n:]*:\s*(.+)$", plain, re.M | re.I)
+        weights = {normalize(w): float(n.replace(",", ".")) for w,n in
+                   re.findall(r"([\w’-]+)\s+(\d+[.,]\d+)", jlens[1] if jlens else "")}
+        dose = re.search(r"\b(?:force perçue\s+)?d\s*=\s*(\d+(?:[.,]\d+)?)", plain)
+        value = float(dose[1].replace(",", ".")) if dose else .55
+        phase = re.search(r"\bphase\s*(?:[:=]\s*)?(?:«([^»]+)»|([^,\n·]+))", plain, re.I)
+        phase = normalize((phase[1] or phase[2]).strip()) if phase else ""
+        shares = dict(re.findall(r"mdma_(\w+) (\d+)%", plain))
+        effect, confidence = choose_effect(phrase, weights)
+        if effect in last_used and start - last_used[effect] < 5:
+            confidence *= .35
+        if effect:
+            last_used[effect] = end
+        shots.append(Shot(start, end, min(1., value), phase, int(shares.get("comedown", 0))/100,
+                          int(shares.get("crash", 0))/100, effect, confidence))
+    # If the vocabulary is unfamiliar, give occasional bright accents to the strongest passages.
+    if not any(s.effect for s in shots):
+        next_accent = 0.
+        for shot in shots:
+            if shot.start >= next_accent and shot.dose >= .5 and shot.end-shot.start >= 1.5:
+                shot.effect, shot.confidence = "halation", .45
+                next_accent = shot.end + 12
     return shots
 
 def ink_ramp(colors):
@@ -58,11 +125,14 @@ LIME = ink_ramp([(11,9,21),(54,18,104),(111,37,176),(229,42,104),(255,136,70),(2
 def palette(frame, ramp):
     return cv.applyColorMap(cv.cvtColor(frame, cv.COLOR_BGR2GRAY), ramp)
 
-def sound_curve(path, fps):
-    pcm = subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-vn","-ac","1","-ar","12000","-f","f32le","-"])
+def sound_curve(path):
+    pcm = subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-map","0:a:0","-vn","-ac","1","-ar","12000","-f","f32le","-"])
     signal = np.frombuffer(pcm, np.float32)
-    n = round(12000/fps)
-    blocks = signal[:len(signal)//n*n].reshape(-1,n)
+    # A 100 Hz analysis clock keeps alignment even at fractional video frame rates.
+    count = len(signal)//120
+    if not count:
+        return np.zeros(1)
+    blocks = signal[:count*120].reshape(-1,120)
     rms = np.sqrt(np.mean(blocks**2, axis=1))
     return np.clip(rms / max(np.percentile(rms, 94), .001), 0, 1)
 
@@ -75,13 +145,14 @@ def smooth(p):
 
 # Local attack, crest and release within selected phrases. Unlisted phrases breathe.
 ACCENTS = {
-    "BRUTAL": (.22, .56, .73, .78),
-    "EXHALE": (.08, .72, .96, .55),
-    "CHAOS": (.41, .49, .75, .69),
-    "COMUNICACIÓN": (.04, .71, .99, .77),
-    "ÉNORME": (.18, .48, .87, .91),
-    "GIGANTIC": (.00, .22, .65, .36),
-    "SEASHELLS": (.18, .62, .94, .33),
+    "tear": (.22, .54, .77, .77),
+    "breath": (.08, .72, .96, .55),
+    "prism": (.04, .71, .99, .80),
+    "iris": (.18, .48, .87, .91),
+    "fossil": (.18, .62, .94, .43),
+    "halation": (.18, .49, .85, .78),
+    "portal": (.34, .59, .83, .74),
+    "echo": (.09, .40, .78, .72),
 }
 
 def accent(word, progress, dose):
@@ -97,44 +168,96 @@ NIGHT = ink_ramp([(3,4,9),(7,10,18),(11,17,28),(20,30,42),(41,49,58),(89,94,92),
 
 def render(source, description, output):
     shots = score(description)
-    cap = cv.VideoCapture(str(source))
-    fps = cap.get(cv.CAP_PROP_FPS)
-    if not cap.isOpened() or fps != 30:
-        raise ValueError("Expected the 30 fps v5 source")
-    energy = sound_curve(source, fps)
+    streams = json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams",
+                                                   "-of","json",str(source)]))["streams"]
+    video = next(s for s in streams if s["codec_type"] == "video" and not s["disposition"]["attached_pic"])
+    rate_text = video.get("avg_frame_rate", "0/0")
+    rate = Fraction(video["r_frame_rate"] if rate_text in ("0/0", "0/1") else rate_text)
+    fps = float(rate)
+    if fps <= 0:
+        raise ValueError("Cannot determine the frame rate")
+    rotation = sum(int(d.get("rotation", 0)) for d in video.get("side_data_list", []))
+    width, height = video["width"], video["height"]
+    sar = video.get("sample_aspect_ratio", "1:1")
+    if sar not in ("N/A", "0:1"):
+        width *= float(Fraction(sar.replace(":", "/")))
+    if rotation % 180:
+        width, height = height, width
+    scale = min(1., 1280/max(width,height), 720/min(width,height))
+    W, H = (max(2, 2*round(n*scale/2)) for n in (width,height))
+    duration = float(video.get("duration", "inf"))
+    short_tail = 0 <= duration-shots[-1].end <= 1.
+    if shots[0].start >= duration:
+        raise ValueError("The first cue starts after the video ends")
+    has_audio = any(s["codec_type"] == "audio" for s in streams)
+    energy = sound_curve(source) if has_audio else np.zeros(1)
     cv.setNumThreads(2)
     gy,gx = np.mgrid[0:H:complex(0,181),0:W:complex(0,321)].astype(np.float32)
-    mids = [(s[0]+s[1])/2 for s in shots]
-    levels = np.asarray([[s[2], s[5], s[6]] for s in shots]).T
-    crash_start = next(s[0] for s in shots if s[4] == "Contrecoup")
-    dusk_start = next(s[0] for s in shots if s[4] == "Descente")
-    past = deque(maxlen=12)
+    mids = [(s.start+s.end)/2 for s in shots]
+    levels = np.asarray([[s.dose, s.comedown, s.crash] for s in shots]).T
+    phases = []
+    for shot in shots:
+        state = ("crash" if shot.phase in ("contrecoup", "rechute", "crash") else
+                 "dusk" if shot.phase in ("descente", "comedown") else "clear")
+        if not phases or phases[-1][1] != state:
+            phases.append((shot.start, state))
+    phase_index = 0
+    past = deque(maxlen=max(2,round(.4*fps)))
+    decode = ["ffmpeg","-v","error","-threads","2","-i",str(source),"-map","0:V:0","-an",
+              "-vf",f"fps={rate},scale={W}:{H}:flags=area,setsar=1","-pix_fmt","bgr24","-threads","2","-f","rawvideo","-"]
     cmd = ["ffmpeg","-v","error","-y","-f","rawvideo","-pixel_format","bgr24","-video_size",f"{W}x{H}",
-           "-framerate",str(fps),"-i","-","-i",str(source),"-map","0:v","-map","1:a","-c:a","copy","-c:v",
+           "-framerate",str(rate),"-i","-","-i",str(source),"-map","0:v","-map","1:a:0?","-c:a","copy","-c:v",
            "libx264","-threads","4","-preset","veryfast","-crf","20","-maxrate","6400k","-bufsize","9600k","-pix_fmt","yuv420p","-movflags","+faststart",str(output)]
     idx = frame_no = 0
-    with subprocess.Popen(cmd,stdin=subprocess.PIPE) as encoder:
+    with subprocess.Popen(decode,stdout=subprocess.PIPE) as decoder, subprocess.Popen(cmd,stdin=subprocess.PIPE) as encoder:
         while True:
-            ok, raw = cap.read()
-            if not ok:
+            raw = decoder.stdout.read(W*H*3)
+            if not raw:
                 break
             t = frame_no/fps
-            while idx+1 < len(shots) and t >= shots[idx+1][0]:
+            while idx+1 < len(shots) and t >= shots[idx+1].start:
                 idx += 1
-            start, end = shots[idx][:2]
+            shot = shots[idx]
+            start, end = shot.start, shot.end
             dose, comedown, crash = (float(np.interp(t, mids, values)) for values in levels)
             u = min(1,(t-start)/(end-start))
-            kind,word,ax,ay = CUES[idx]
-            strength = accent(word, u, dose)
-            v = float(energy[min(frame_no,len(energy)-1)])
-            src = cv.resize(raw,(W,H),interpolation=cv.INTER_AREA)
+            kind = shot.effect
+            ax, ay = (.34,.72) if kind == "fossil" else (.5,.47)
+            active = start <= t < end
+            strength = accent(kind, u, dose) * shot.confidence if active else 0.
+            v = float(energy[min(round(100*t),len(energy)-1)])
+            src = np.frombuffer(raw,np.uint8).reshape(H,W,3)
             past.append(src)
             frame = src
-            if strength > .001:
+            if strength > .001 and kind == "halation":
+                # Diffraction spreads the brightest highlights into two crossing streaks.
+                small = cv.resize(src,(max(8,W//4),max(8,H//4)), interpolation=cv.INTER_AREA)
+                light = cv.subtract(small, (85,85,85,0))
+                kernel = np.eye(23,dtype=np.float32)/23
+                rays = cv.add(cv.filter2D(light,-1,kernel), cv.filter2D(light,-1,kernel[:,::-1]))
+                flare = cv.resize(cv.add(rays,cv.GaussianBlur(light,(0,0),4)),(W,H))
+                frame = cv.addWeighted(src,1.,flare,strength*1.7,0)
+            elif strength > .001 and kind == "portal":
+                # A moving annulus magnifies just a ring of the scene, with glass-like hard rims.
+                x, y = (gx-W*ax)/H, (gy-H*ay)/H
+                distance = np.hypot(x,y)
+                ring = np.exp(-((distance-(.10+.45*u))/.059)**2)
+                lens = 1 - .82*strength*ring
+                frame = cv.remap(src,cv.resize(W*ax+H*x*lens,(W,H)),cv.resize(H*ay+H*y*lens,(W,H)),
+                                 cv.INTER_LINEAR,borderMode=cv.BORDER_REFLECT_101)
+            elif strength > .001 and kind == "echo":
+                # Drag a cool afterimage of the earlier contours across the current frame.
+                old = cv.cvtColor(past[0],cv.COLOR_BGR2GRAY)
+                edge = cv.subtract(old,cv.GaussianBlur(old,(0,0),max(1.,W/130)))
+                shift = round(W*(.012+.045*u))
+                ghost = cv.warpAffine(edge,np.float32([[1,0,shift],[0,1,0]]),(W,H))
+                light = cv.merge((ghost,ghost//2,ghost//5))
+                frame = cv.addWeighted(src,1.,light,3.2*strength,0)
+            elif strength > .001:
                 x,y = (gx-W*ax)/H,(gy-H*ay)/H
                 r = np.hypot(x,y)
                 angle = np.arctan2(y,x)
-                ramp = (HOT if idx%2 else LIME) if idx < 12 else ICE
+                ramp = (HOT if idx%2 else LIME) if shot.phase not in ("descente","contrecoup","rechute","crash","comedown") else ICE
                 if kind in ("prism","iris","breath"):
                     sectors = {"prism":7,"iris":5,"breath":3}[kind]
                     sector = 2*math.pi/sectors
@@ -148,7 +271,7 @@ def render(source, description, output):
                     rr = r*(.76+.16*np.sin(13*r-4*u))
                     mx = gx + amount*(W*ax+H*rr*np.cos(theta)-gx)
                     my = gy + amount*(H*ay+H*rr*np.sin(theta)-gy)
-                elif kind in ("tear","choir","echo"):
+                elif kind == "tear":
                     bands = np.floor((gy/H*11)+.25*math.sin(2*t))
                     jump = np.sin(bands*14.3+math.floor(u*4)*.69)
                     shift = (22+88*dose)*(1+.36*v)
@@ -160,17 +283,17 @@ def render(source, description, output):
                 warp = cv.remap(src,cv.resize(gx + strength*(mx-gx),(W,H)),cv.resize(gy + strength*(my-gy),(W,H)),cv.INTER_LINEAR,borderMode=cv.BORDER_REFLECT_101)
                 print_frame = palette(warp,ramp)
                 frame = mix(warp,print_frame,.57+.21*dose)
-                if kind in ("tear","choir","echo"):
+                if kind == "tear":
                     delay = past[0]
-                    for band in range(1 if kind=="choir" else 2,11,3):
+                    for band in range(2,11,3):
                         a,b = H*band//11,H*(band+1)//11
-                        frame[a:b] = np.roll(palette(delay[a:b], ICE if idx<12 else HOT), int(40+90*v),axis=1)
+                        frame[a:b] = np.roll(palette(delay[a:b], ICE if ramp is not ICE else HOT), int(40+90*v),axis=1)
                 if kind in ("prism","iris","fossil"):
                     gray = cv.cvtColor(warp,cv.COLOR_BGR2GRAY)
                     # Contour bands follow photographic luminance, like a movable engraving plate.
                     level = (gray.astype(np.int16)+int(12*t))%31
                     contour = (level < (3 if kind=="fossil" else 2))
-                    frame[contour] = (167,245,239) if idx<12 else (50,52,32)
+                    frame[contour] = (167,245,239) if ramp is not ICE else (50,52,32)
                 if kind in ("iris","fossil"):
                     # Broken wavefronts echo the original light source and later the shell whorl.
                     for j in range(8):
@@ -180,25 +303,35 @@ def render(source, description, output):
                                    (158,227,244),1+j%2,cv.LINE_AA)
                 frame = mix(src, frame, strength)
             # As the comedown crosses into crash, keep only the street's brightest reflections.
-            descent = smooth((t-dusk_start)/9)
-            relapse = smooth((t-crash_start+2)/6)
-            shadow = descent * (.14 + .27*comedown + .30*crash) + .62*relapse
+            while phase_index+1 < len(phases) and t >= phases[phase_index+1][0]:
+                phase_index += 1
+            phase_start, state = phases[phase_index]
+            previous = phases[phase_index-1][1] if phase_index else "clear"
+            targets = {"clear":0., "dusk":.24+.25*comedown+.20*crash, "crash":.985}
+            fade = smooth((t-phase_start)/(5 if state=="crash" else 8))
+            shadow = ((1-fade)*targets[previous]+fade*targets[state]) if active else 0.
             if shadow > .001:
-                night = palette(frame, NIGHT)
-                frame = mix(frame, night, min(.985, shadow))
-            if t > shots[-1][1]:
-                frame = cv.convertScaleAbs(frame,alpha=max(0,1-(t-shots[-1][1])/.60))
+                frame = mix(frame, palette(frame, NIGHT), shadow)
+            if short_tail and state == "crash" and t >= shots[-1].end:
+                # Hold the night grade across the encoder tail, then fade to black.
+                frame = cv.convertScaleAbs(palette(src,NIGHT), alpha=max(0,1-(t-shots[-1].end)/.60))
             encoder.stdin.write(frame.tobytes())
             frame_no += 1
-            if frame_no%300==0:
+            if frame_no%max(1,round(10*fps))==0:
                 print(f"{frame_no/fps:.0f} s",flush=True)
         encoder.stdin.close()
-        if encoder.wait():
+        if encoder.wait() or decoder.wait() or not frame_no:
             raise RuntimeError("Video encoding failed")
-    cap.release()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source","description","output"):
         parser.add_argument(name,type=Path)
-    render(**vars(parser.parse_args()))
+    args = parser.parse_args()
+    if args.output.resolve() in (args.source.resolve(), args.description.resolve()):
+        parser.error("Choose a separate output MP4")
+    with tempfile.TemporaryDirectory(dir=args.output.parent) as directory:
+        temporary = Path(directory) / "render.mp4"
+        render(args.source, args.description, temporary)
+        temporary.replace(args.output)
