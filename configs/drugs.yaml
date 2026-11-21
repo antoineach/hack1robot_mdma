@@ -1,0 +1,259 @@
+# Catalogue des drogues. Chaque phase : part de la prise [start, end] (0..1), niveau 0..4, mots-clés.
+# Niveaux -> α : voir `levels`. Mots anglais, de préférence un seul token Gemma ; contrôle dans
+# runs/setup/drug_tokens.json (python -m introspect.drugs --check).
+levels: {0: 0.0, 1: 0.0015, 2: 0.0022, 3: 0.0030, 4: 0.0040}
+alpha_cap: 0.006
+draw_every: 12      # tokens entre deux tirages
+draw_k: 3           # mots par tirage
+transition: 0.05    # part de la prise pour lisser le passage d'une phase à l'autre
+band: [0.45, 0.70]
+
+drugs:
+  alcool:
+    label: Alcool
+    phases:
+      - name: Désinhibition
+        start: 0.00
+        end: 0.25
+        level: 2
+        words: [laugh, warm, bold, chatty, flirt, cheers, loose, friends, glow, toast, smile, cozy, giggle, easy, relaxed, social, sparkle, wink, banter, cheerful, tipsy, rosy, merry, playful, jolly, open, honest, confident, grin, buzz, flushed, mellow, careless, sweet, charming]
+      - name: Euphorie
+        start: 0.25
+        end: 0.50
+        level: 3
+        words: [dance, sing, shout, love, wild, party, spin, brave, hug, joke, scream, jump, crazy, loud, celebrate, chorus, kiss, freedom, rush, roar, clap, cheer, euphoria, thrill, bounce, swing, laughter, hero, forever, ecstatic, stomp, whirl, howl, giddy, bliss]
+      - name: Ivresse lourde
+        start: 0.50
+        end: 0.75
+        level: 4
+        words: [stumble, blur, sway, slur, heavy, nausea, fall, fog, clumsy, dizzy, spinning, vomit, drunk, tilt, wobble, mumble, haze, collapse, numb, stagger, lost, floor, swirl, sloppy, groggy, droop, trip, spill, fumble, sink, slump, murky, faint, sick, ground]
+      - name: Gueule de bois
+        start: 0.75
+        end: 1.00
+        level: 2
+        words: [regret, headache, shame, thirst, grey, empty, tired, sorry, silence, sick, aching, dry, pale, foggy, guilt, groan, curtains, water, nausea, pounding, sluggish, ashamed, bleak, dull, sour, stale, heavy, quiet, broken, mess, apology, dim, weary, throbbing, bed]
+  cannabis:
+    label: Cannabis
+    phases:
+      - name: Montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [tingle, smile, soft, slow, warm, curious, float, hazy, calm, giggle, mellow, gentle, light, dreamy, cozy, easy, smoke, breeze, drift, loose, relaxed, sleepy, velvet, glow, hum, peaceful, airy, lazy, sweet, quiet, cloud, sigh, tender, dim, cushion]
+      - name: Fous rires
+        start: 0.15
+        end: 0.45
+        level: 3
+        words: [laugh, funny, absurd, silly, cartoon, hungry, snack, colors, music, wonder, giggle, hilarious, ridiculous, weird, goofy, pizza, chips, cookies, joke, nonsense, bizarre, cosmic, rainbow, munchies, chocolate, tickle, grin, crazy, comedy, strange, wobbly, bubble, sugar, puzzle, dumb]
+      - name: Lenteur
+        start: 0.45
+        end: 0.80
+        level: 3
+        words: [couch, drift, sticky, time, cosmic, deep, sleepy, honey, melt, slow, heavy, syrup, stretch, molasses, endless, eternity, sink, floating, gravity, liquid, dense, ocean, thick, pillow, haze, dream, timeless, frozen, lazy, sluggish, universe, swirl, blanket, sunk, still]
+      - name: Paranoïa, somnolence
+        start: 0.80
+        end: 1.00
+        level: 2
+        words: [watched, door, suspicious, heartbeat, mistake, whisper, nervous, hide, sleep, dark, paranoid, shadow, footsteps, knock, police, anxious, sweat, eyes, alone, curtain, creak, stare, guilty, secret, panic, silence, blink, yawn, tired, drowsy, pillow, phone, window, noise, worry]
+  cocaine:
+    label: Cocaïne
+    phases:
+      - name: Rush
+        start: 0.00
+        end: 0.08
+        level: 4
+        words: [sharp, bright, electric, fast, ice, spark, crisp, rush, alert, clean, white, numb, cold, jolt, flash, speed, crystal, neon, laser, focus, blade, chrome, glitter, snow, surge, pulse, racing, buzz, frost, wired, tight, clear, precise, glare, sting]
+      - name: Toute-puissance
+        start: 0.08
+        end: 0.30
+        level: 4
+        words: [king, genius, power, win, money, talk, control, perfect, invincible, gold, boss, empire, champion, deal, success, conquer, brilliant, rich, victory, crown, throne, unstoppable, legend, dominate, superior, ambition, plan, mansion, diamond, confident, loud, master, glory, profit, best]
+      - name: Chute
+        start: 0.30
+        end: 0.45
+        level: 3
+        words: [crash, cold, empty, grey, sweat, falling, hollow, nervous, dark, shiver, collapse, sink, drop, broken, ache, dread, gloom, pale, shaking, tremble, void, abyss, bleak, fragile, weak, ashes, numb, sick, panic, tense, jaw, teeth, drained, lost, ruin]
+      - name: Manque, paranoïa
+        start: 0.45
+        end: 1.00
+        level: 2
+        words: [more, again, need, window, footsteps, mirror, watch, alone, hunger, dawn, craving, door, peephole, curtains, sirens, phone, search, floor, crumbs, sweat, restless, itch, suspicious, shadows, whisper, police, lock, sleepless, birds, morning, grey, hollow, dealer, nose, desperate]
+  amphetamines:
+    label: Amphétamines
+    phases:
+      - name: Montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [awake, focus, sharp, quick, ready, buzz, clear, eager, bright, alert, energy, crisp, keen, fresh, start, spark, motivated, wired, attentive, vivid, lucid, tense, jaw, pulse, eyes, precise, steady, morning, coffee, sprint, open, quickness, wide, hungry, rising]
+      - name: Énergie
+        start: 0.15
+        end: 0.55
+        level: 3
+        words: [run, build, list, plan, endless, motor, drive, task, engine, tireless, work, project, machine, sprint, speed, momentum, efficient, productive, organize, fix, clean, marathon, factory, rhythm, piston, gear, fuel, power, march, conquer, achieve, goal, progress, action, relentless]
+      - name: Logorrhée, obsession
+        start: 0.55
+        end: 0.80
+        level: 4
+        words: [talk, again, detail, count, sort, repeat, theory, map, wire, pattern, numbers, list, obsess, loop, arrange, analyze, connect, system, chart, words, chatter, ramble, spiral, grind, compulsive, puzzle, code, tiny, order, symmetry, fixate, measure, diagram, endless, thread]
+      - name: Épuisement
+        start: 0.80
+        end: 1.00
+        level: 2
+        words: [drained, ache, hollow, grey, insomnia, dust, brittle, irritable, empty, numb, exhausted, crash, sore, jaw, dry, ceiling, awake, sleepless, burnt, bones, flicker, static, raw, frayed, weary, gaunt, twitch, dawn, shaky, dim, faded, sour, fragile, depleted, cracked]
+  mdma:
+    label: MDMA
+    phases:
+      - name: Montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [shiver, chills, nausea, wave, rising, tingling, butterflies, pulse, flushed, open, warm, jaw, sweat, anticipation, heartbeat, glow, electric, surge, goosebumps, swell, breath, bloom, flutter, wonder, anxious, bright, vibration, music, blush, buzz, light, nervous, coming, expanding, lifting]
+      - name: Amour, fusion
+        start: 0.15
+        end: 0.55
+        level: 4
+        words: [love, hug, together, music, everyone, touch, soft, heart, glow, beautiful, embrace, friends, warmth, bliss, unity, family, kindness, connection, gentle, tender, skin, harmony, sweet, trust, joy, dance, smile, angel, open, honest, forever, sparkle, glowing, euphoria, belonging]
+      - name: Descente
+        start: 0.55
+        end: 0.75
+        level: 2
+        words: [tired, fading, quiet, thirsty, cold, ending, sweat, grey, tender, slow, water, dawn, sore, jaw, calm, drift, soft, lights, leaving, tired, morning, hush, gentle, fade, blanket, wistful, sleepy, chill, sigh, settle, cool, dim, home, last, faint]
+      - name: Contrecoup
+        start: 0.75
+        end: 1.00
+        level: 3
+        words: [sad, empty, lonely, tears, Tuesday, hollow, dull, gloom, fragile, numb, despair, grey, rain, blue, heavy, crying, sorrow, drained, flat, bleak, ache, melancholy, alone, silence, cold, shadow, weep, lost, nothing, weary, pale, regret, mourning, sink, darkness]
+  lsd:
+    label: LSD
+    phases:
+      - name: Montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [shimmer, breathing, patterns, giggle, strange, vivid, ripple, odd, electric, unfold, glow, tingle, curious, wobble, sparkle, colors, texture, wave, bright, flicker, crisp, alive, awake, wonder, shift, bloom, pulse, sharp, crawling, wood, grain, swirl, edges, humming, surface]
+      - name: Pic
+        start: 0.15
+        end: 0.45
+        level: 4
+        words: [fractal, kaleidoscope, cosmos, infinite, melt, geometry, colors, ego, dissolve, prism, spiral, mandala, rainbow, vortex, crystal, neon, liquid, morph, ripple, hexagon, galaxy, cosmic, light, unity, explosion, pattern, symmetry, prismatic, psychedelic, iridescent, swirl, mirror, dimension, warp, radiant]
+      - name: Plateau
+        start: 0.45
+        end: 0.80
+        level: 3
+        words: [universe, meaning, connection, nature, time, mirror, symbol, wisdom, wonder, eternity, truth, tree, ocean, sky, spirit, harmony, life, breath, cycle, roots, stars, soul, sacred, beauty, music, insight, river, mystery, ancient, cosmic, silence, oneness, being, earth, revelation]
+      - name: Retour
+        start: 0.80
+        end: 1.00
+        level: 1
+        words: [tired, gentle, afterglow, sunrise, quiet, home, grounded, calm, ordinary, soft, peace, tea, blanket, warm, rest, light, morning, grateful, clear, still, birds, kitchen, simple, bed, slow, smile, dawn, pale, settle, fresh, return, ease, hush, relief, sleep]
+  champignons:
+    label: Champignons
+    phases:
+      - name: Malaise de montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [nausea, yawn, cold, uneasy, stomach, earthy, heavy, shiver, waiting, strange, queasy, chills, damp, musty, fungus, tingling, restless, anxious, sweat, dizzy, bitter, soil, tense, pale, uncertain, wobble, odd, sick, cramp, swallow, mud, dread, rising, slow, weird]
+      - name: Pic
+        start: 0.15
+        end: 0.50
+        level: 4
+        words: [forest, moss, roots, breathing, alive, spiral, laughter, giant, green, trees, leaves, vines, fern, branches, mycelium, earth, bark, petals, jungle, glowing, swirl, pulse, waves, colors, organic, growth, wild, ancient, living, flowers, canopy, emerald, river, tendrils, bloom]
+      - name: Introspection
+        start: 0.50
+        end: 0.80
+        level: 3
+        words: [childhood, mother, tears, forgive, truth, soul, memory, past, humble, death, father, family, regret, healing, love, grief, honesty, wound, child, letting, birth, ancestors, home, grace, compassion, mirror, confession, forgiveness, innocence, loss, sorrow, purpose, gratitude, mortality, heart]
+      - name: Redescente
+        start: 0.80
+        end: 1.00
+        level: 1
+        words: [rain, soil, gratitude, rest, soft, quiet, sleep, home, clean, gentle, calm, dew, morning, blanket, peace, warm, slow, breath, tea, garden, silence, relief, tired, light, simple, ease, still, grass, kind, bed, mist, renewed, settle, fresh, gentle]
+  dmt:
+    label: DMT
+    phases:
+      - name: Sobre
+        start: 0.00
+        end: 0.10
+        level: 0
+        words: []
+      - name: Décollage
+        start: 0.10
+        end: 0.20
+        level: 4
+        words: [rocket, tunnel, roar, buzzing, launch, vibration, tearing, speed, explode, light, blast, thunder, shatter, scream, engine, acceleration, catapult, burst, whirl, vortex, flash, rip, siren, quake, surge, hurricane, blinding, crack, lift, propel, blaze, shockwave, warp, ignite, hum]
+      - name: Percée
+        start: 0.20
+        end: 0.60
+        level: 4
+        words: [entities, beings, palace, jester, machine, elves, temple, alien, hyperspace, jewels, geometry, dome, chamber, crystals, gods, mantis, serpent, throne, cathedral, ornaments, gold, kaleidoscope, intelligence, welcome, messengers, carnival, tapestry, glyphs, mechanism, realm, gateway, dimension, celestial, spectacle, infinite]
+      - name: Retour
+        start: 0.60
+        end: 1.00
+        level: 1
+        words: [falling, body, ordinary, laugh, impossible, gone, echo, dream, stunned, return, breath, room, ceiling, heavy, blink, wow, silence, astonished, shaking, tears, gravity, floor, fading, quiet, memory, landing, again, fragments, awake, numb, wonder, speechless, normal, home, light]
+  ketamine:
+    label: Kétamine
+    phases:
+      - name: Montée
+        start: 0.00
+        end: 0.15
+        level: 2
+        words: [numb, heavy, distant, slow, rubber, floating, muffled, wobble, foggy, quiet, drift, sinking, cotton, delay, echo, blurry, soft, padded, faraway, dizzy, detached, lazy, swaying, cloudy, slurred, dull, sleepy, tingling, wooden, limbs, glass, mute, cushion, haze, hollow]
+      - name: Dissociation
+        start: 0.15
+        end: 0.65
+        level: 4
+        words: [void, hole, detached, nowhere, machine, pixels, outside, dimension, nothing, observer, emptiness, abyss, simulation, matrix, grid, static, glitch, tunnel, vacuum, mechanical, robot, shapeless, formless, fragments, geometry, infinite, cold, signal, silence, orbit, floating, separate, cosmos, digital, absence]
+      - name: Retour
+        start: 0.65
+        end: 1.00
+        level: 2
+        words: [confused, wobbly, robot, blank, clumsy, gravity, reboot, words, strange, slow, heavy, stumble, puzzled, fuzzy, numb, legs, return, body, foggy, tired, dazed, unsteady, awkward, sluggish, room, ceiling, floor, blink, quiet, weird, lost, remember, dim, breath, ground]
+  heroine:
+    label: Héroïne
+    phases:
+      - name: Rush
+        start: 0.00
+        end: 0.10
+        level: 4
+        words: [warm, wave, bliss, honey, melt, rush, heavy, glow, sigh, velvet, golden, flood, liquid, sweet, silk, euphoria, sinking, embrace, heat, swell, flush, molten, ecstasy, calm, soothing, cream, sun, pour, deep, release, ease, smooth, radiant, surrender, comfort]
+      - name: Cocon
+        start: 0.10
+        end: 0.55
+        level: 3
+        words: [cocoon, blanket, safe, womb, soft, nothing, peace, cushion, sleepy, cotton, warm, shelter, padded, quiet, hidden, cradle, nest, pillow, wool, cozy, protected, muffled, still, gentle, fog, cloud, mother, lullaby, numb, serene, haven, tender, hush, curled, dim]
+      - name: Torpeur
+        start: 0.55
+        end: 0.80
+        level: 2
+        words: [nod, drift, dream, sink, still, slow, fog, silence, drowsy, dim, heavy, eyelids, fading, sleep, murky, distant, blur, sag, slumber, limp, pale, faint, sluggish, cigarette, ash, ceiling, hours, dull, numb, haze, lull, motionless, droop, vague, dark]
+      - name: Manque
+        start: 0.80
+        end: 1.00
+        level: 3
+        words: [cold, ache, sweat, crawling, need, restless, shiver, pain, sick, craving, bones, cramps, nausea, itch, chills, desperate, twitch, insomnia, anxious, hunger, fever, trembling, skin, misery, agony, empty, sneeze, yawn, kicking, grey, dread, panic, raw, hollow, sore]
+  datura:
+    label: Datura
+    phases:
+      - name: Confusion
+        start: 0.00
+        end: 0.20
+        level: 2
+        words: [thirsty, blurry, dry, heat, lost, stranger, confused, flushed, muttering, cigarette, dizzy, fever, pupils, mouth, sand, burning, wandering, forgetful, mumble, haze, strange, puzzled, sweat, foggy, stumble, unfamiliar, hot, desert, parched, red, pulse, tremor, odd, disoriented, faint]
+      - name: Délire
+        start: 0.20
+        end: 0.65
+        level: 4
+        words: [spiders, shadows, voices, ghosts, phantom, conversation, invisible, crawling, smoke, strangers, figures, whispers, insects, hallucination, dead, visitors, apparitions, threads, cobwebs, faces, mirror, illusion, specter, murmuring, crowd, doorway, silhouettes, ants, worms, puppets, masks, mist, wraith, darkness, unseen]
+      - name: Cauchemar
+        start: 0.65
+        end: 0.90
+        level: 4
+        words: [terror, darkness, trapped, insects, screaming, demons, walls, endless, chase, coffin, nightmare, horror, monster, blood, prison, cage, drowning, suffocate, panic, scream, rotting, buried, hellfire, claws, devour, abyss, howling, swarm, pursuit, maze, fear, death, grave, hunted, decay]
+      - name: Amnésie
+        start: 0.90
+        end: 1.00
+        level: 1
+        words: [blank, missing, nothing, gap, erased, waking, forgotten, hospital, morning, silence, white, empty, bed, ceiling, unknown, fog, hole, sheets, nurse, faint, lost, pale, quiet, confused, vacant, sterile, dim, dawn, unclear, memory, void, numb, tired, fragments, absence]

@@ -1,0 +1,53 @@
+# Environnements : une situation courte qui précède la consigne de dissertation.
+# image_style s'ajoute à image.style ; sound_texture remplace le suffixe de la couche A (Stable Audio)
+# quand input.environment_style est vrai.
+rave:
+  label: Rave
+  prompt: "Il est 4 h, tu es au fond d'un entrepôt où joue une rave."
+  image_style: "strobe lights, concrete, haze, neon"
+  sound_texture: "distant techno through concrete walls, crowd"
+mariage:
+  label: Mariage
+  prompt: "Tu es à un mariage, entre le dessert et la première danse."
+  image_style: "warm string lights, white tablecloths, golden hour"
+  sound_texture: "reception murmur, clinking glasses, distant accordion"
+enterrement:
+  label: Enterrement
+  prompt: "Tu es à un enterrement, au bord de la tombe."
+  image_style: "grey sky, black coats, wet cemetery"
+  sound_texture: "wind, muffled crowd, distant bell"
+open_space:
+  label: Open space
+  prompt: "C'est lundi, 9 h 03, dans un open space."
+  image_style: "fluorescent office light, cubicles, beige"
+  sound_texture: "air conditioning hum, keyboards, phone ringing"
+foret:
+  label: Forêt
+  prompt: "Tu es seul dans une forêt, la nuit."
+  image_style: "moonlit forest, fog, dark trees"
+  sound_texture: "night forest, owls, wind in leaves"
+urgences:
+  label: Urgences
+  prompt: "Tu attends depuis des heures aux urgences."
+  image_style: "hospital corridor, neon, plastic chairs"
+  sound_texture: "hospital hum, beeping monitors, distant announcements"
+plage:
+  label: Plage
+  prompt: "Tu es sur une plage, à l'aube."
+  image_style: "pastel dawn, wet sand, mist"
+  sound_texture: "gentle waves, seagulls, morning wind"
+garde_a_vue:
+  label: Garde à vue
+  prompt: "Tu es en garde à vue depuis la veille."
+  image_style: "concrete cell, harsh light, bars"
+  sound_texture: "metal doors, echoing corridor, fluorescent buzz"
+eglise:
+  label: Église
+  prompt: "Tu es assis au fond d'une église vide."
+  image_style: "stained glass light, stone, candles"
+  sound_texture: "stone reverberation, distant organ drone, footsteps"
+chambre:
+  label: Chambre
+  prompt: "Tu es dans ta chambre d'adolescent, porte fermée."
+  image_style: "posters, desk lamp, cluttered bedroom at night"
+  sound_texture: "muffled music, rain on the window"

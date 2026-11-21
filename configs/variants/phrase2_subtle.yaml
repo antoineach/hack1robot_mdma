@@ -1,0 +1,5 @@
+run_tag: phrase2-subtle
+input: {phrase_index: 1}
+sound: {mode: mixte}
+drugs:
+  - {word: ocean, alpha: 0.002, band: [0.45, 0.70], profile: ramp, start: 100, end: 400}

@@ -1,0 +1,5 @@
+run_tag: smoke-record
+generation: {max_new_tokens: 40}
+windows: {size: 16, stride: 8}
+drugs:
+  - {word: ocean, alpha: 4.0, band: [0.45, 0.70], profile: ramp, start: 0, end: 20}

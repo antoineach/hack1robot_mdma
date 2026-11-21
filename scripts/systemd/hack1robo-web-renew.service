@@ -1,0 +1,6 @@
+[Unit]
+Description=hack1robo : relance l'interface web pour renouveler le lien Gradio (expire au bout de 72 h)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --user restart hack1robo-web.service

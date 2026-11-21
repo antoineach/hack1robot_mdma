@@ -1,0 +1,6 @@
+image:
+  prompt_template: "A surreal dreamlike oil painting, a visual metaphor of {words}. {style}"
+  style: "Diffuse light, soft haze, rich colors, painterly brushstrokes, cinematic composition"
+  prompt_words: 6
+  strength: 0.7
+  reset_every: 8

@@ -1,0 +1,5 @@
+image:
+  prompt_template: "A surreal dreamlike painting evoking {words}. {style}"
+  style: "Oil painting, diffuse light, soft haze, rich colors, no text, no letters, no writing, no typography"
+  strength: 0.7
+  reset_every: 8

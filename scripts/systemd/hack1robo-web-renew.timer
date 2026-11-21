@@ -1,0 +1,10 @@
+[Unit]
+Description=hack1robo : renouvelle le lien Gradio toutes les 48 h
+
+[Timer]
+OnActiveSec=48h
+OnUnitActiveSec=48h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

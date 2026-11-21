@@ -1,0 +1,16 @@
+[Unit]
+Description=hack1robo : interface web Gradio (lien public + mot de passe)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/home/olivier/ws_claude/hack1robo
+ExecStart=/var/home/olivier/ws_claude/hack1robo/run.sh web
+Restart=on-failure
+RestartSec=10
+# pas de droits supplémentaires : tourne avec l'utilisateur, sans sudo
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

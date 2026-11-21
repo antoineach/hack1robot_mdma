@@ -1,0 +1,26 @@
+# Versions testées (Python 3.12, CUDA 13.2, RTX A6000 48 Go). Installer torch depuis l'index CUDA adapté.
+torch==2.15.0
+torchaudio==2.11.1
+transformers==5.23.0
+diffusers==0.43.0
+accelerate==1.16.0
+safetensors==0.8.0
+huggingface_hub==2.4.0
+sentence-transformers==6.3.0
+kokoro==0.9.4
+misaki==0.9.4
+spacy==3.8.18
+torchsde==0.2.6
+einops==0.8.2
+pedalboard==0.9.26
+soundfile==0.14.0
+numpy==2.5.5
+scipy==1.18.1
+pillow==13.0.0
+pyyaml==6.0.3
+requests==2.34.2
+gradio==6.32.0
+# Modèle spaCy anglais (voix Kokoro anglaises) :
+# en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+# Lentille J-lens (installée en mode éditable) :
+# -e vendor/jacobian-lens   (git clone https://github.com/anthropics/jacobian-lens, commit 581d398)

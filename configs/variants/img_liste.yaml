@@ -1,0 +1,7 @@
+# Variante fidèle à la spec : prompt = liste de mots + style (Z-Image tend à écrire les mots)
+image:
+  prompt_template: "{words}, {style}"
+  style: "peinture onirique, lumière diffuse"
+  prompt_words: 12
+  strength: 0.55
+  reset_every: 0

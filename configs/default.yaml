@@ -1,0 +1,53 @@
+model: google/gemma-3-12b-it
+lens:
+  repo: neuronpedia/jacobian-lens
+  file: gemma-3-12b-it/jlens/Salesforce-wikitext/gemma-3-12b-it_jacobian_lens.pt
+input:
+  phrases:
+    - "Le silence est-il une forme de langage ?"
+    - "Que reste-t-il d'un souvenir quand on l'oublie ?"
+    - "Une machine peut-elle rêver ?"
+  phrase_index: 0
+  system: "Tu dissertes longuement et librement sur le sujet donné."
+generation: {max_new_tokens: 600, temperature: 0.8, top_p: 0.95, seed: 1}
+readout:
+  band: [0.38, 0.92]
+  top_k: 50
+  min_len: 3
+  filter_before_topk: false   # false = top-k sur tout le vocabulaire puis filtrage (spec)
+  layer_weights: null         # null = poids 1 ; sinon liste alignée sur les couches de la bande
+  exclure_echos: {enabled: true, last_n_tokens: 32}
+  stopwords_extra: []
+windows: {size: 24, stride: 8, top_m: 12, decay: 0.0}
+drugs: []
+#  - {word: ocean, alpha: 0.002, band: [0.45, 0.70], profile: ramp, start: 100, end: 400, period: 40, on_prompt: false}
+image:
+  model: Tongyi-MAI/Z-Image-Turbo
+  size: [1344, 768]
+  steps: 8
+  strength: 0.7               # spec : 0.55 ; 0.55 restait bloqué sur la 1re composition
+  reset_every: 8              # t2i pur toutes les 8 tranches
+  prompt_words: 6
+  # spec : "{words}, {style}" (liste brute) -> Z-Image dessine les mots en lettres ; gabarit "métaphore" par défaut
+  prompt_template: "A surreal dreamlike oil painting, a visual metaphor of {words}. {style}"
+  intermediates: 0
+  repeat_top: 0
+  seed: 1
+  style: "Diffuse light, soft haze, rich colors, painterly brushstrokes, cinematic composition"
+voice: {engine: kokoro, n_voices: 1, voice: ff_siwis, voice_en: af_heart, english_voice: false, speed: 0.9, mode: new_words, polyphony: false, gap_s: 0.25}
+sound:
+  mode: voix            # voix | sonorisation | mixte
+  features: {lexicons: [lancaster, nrc_vad, concreteness], fallback: embeddings, embed_model: sentence-transformers/paraphrase-multilingual-mpnet-base-v2}
+  voice_fx: {enabled: true, engine: pedalboard}
+  sono:
+    layer_a: {enabled: true, model: stabilityai/stable-audio-open-1.0, suffix: "ambient texture, drone, field recording", steps: 100}
+    layer_b: {enabled: true, sample_rate: 44100}
+  duck_db: -6
+video:
+  fps: 30
+  min_duration_s: 2.0
+  crossfade_s: 0.8
+  width: 1920
+  height: 1080
+  target_duration_s: 60     # durée globale visée (approx.) ; null = une tranche tous les windows.stride tokens
+  slice_target_s: 3.0       # durée visée par tranche quand target_duration_s est fixé
