@@ -4,6 +4,8 @@ Ce projet artistique produit une vidéo des « pensées » d'un modèle de langa
 
 Pour aller plus loin : `SPEC.md` et `SPEC_V2.md` (cahiers des charges), `DECISIONS.md` (journal des choix), `MORNING_REPORT.md` (prompt système, mécanisme de la drogue, calibration, mesures) et `PROGRESS.md`.
 
+[Guide de postproduction VFX par phase](GUIDE_VFX.md)
+
 ---
 
 ## 1. Modèles utilisés

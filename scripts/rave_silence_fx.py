@@ -166,8 +166,73 @@ def accent(word, progress, dose):
 # Deep blue-black shadows, with a long shoulder for reflections in the wet street.
 NIGHT = ink_ramp([(3,4,9),(7,10,18),(11,17,28),(20,30,42),(41,49,58),(89,94,92),(207,199,173)])
 
-def render(source, description, output):
+def glitch(frame, delayed, t, level, energy):
+    height, width = frame.shape[:2]
+    # Keep chromatic displacement between bursts of horizontal tearing.
+    offset = max(1, round(width * (.004 + .023 * level)))
+    shifted = frame.copy()
+    shifted[:, :, 0] = np.roll(frame[:, :, 0], offset, axis=1)
+    shifted[:, :, 2] = np.roll(frame[:, :, 2], -offset, axis=1)
+    result = mix(frame, shifted, level * .74)
+
+    beats = t * (1.1 + .65 * level)
+    pulse = (.5 + .5 * math.sin(2 * math.pi * beats)) ** 3
+    height_fraction = .024 + .06 * level
+    for band in range(3):
+        position = (.14 + .29 * band + .095 * math.sin(1.8 * t + band * 2.1)) % 1
+        top = int(height * position)
+        bottom = min(height, top + max(1, round(height * height_fraction)))
+        direction = -1 if band % 2 else 1
+        jump = direction * round(width * level * (.018 + .12 * pulse))
+        tear = np.roll(delayed[top:bottom], jump, axis=1)
+        result[top:bottom] = mix(result[top:bottom], tear, level * (.23 + .48 * pulse + .12 * energy))
+    return result
+
+
+def phase_finish(frame, delayed, t, onset, peak, state, dose, energy):
+    if state == "crash":
+        return mix(frame, palette(frame, NIGHT), .32)
+    if state == "dusk":
+        return mix(frame, delayed, .12 + .09 * dose)
+    if t < peak:
+        envelope = smooth((t - onset) / (peak - onset))
+        if envelope <= 0:
+            return frame
+        # A brief fracture at entry gives way to a sustained bloom.
+        pulse = smooth((t - onset) / .24) * (1 - smooth((t - onset - .42) / 1.6))
+        if pulse > .001:
+            frame = glitch(frame, delayed, t, .8 * pulse, energy)
+    else:
+        envelope = .65 + .35 * dose
+    height, width = frame.shape[:2]
+    highlights = cv.resize(frame, (max(2, width // 8), max(2, height // 8)), interpolation=cv.INTER_AREA)
+    highlights = cv.subtract(highlights, (112, 112, 112, 0))
+    glow = cv.resize(cv.GaussianBlur(highlights, (0, 0), 2.8), (width, height))
+    return cv.addWeighted(frame, 1., glow, (.42 + .28 * energy) * envelope, 0.)
+
+
+def render(source, description, output, *, strong=False, continuous=False, by_phase=False):
     shots = score(description)
+    onset = next((shot.start for shot in shots if shot.dose > 0), shots[-1].end)
+    offset = max((shot.end for shot in shots if shot.dose > 0), default=onset)
+    peak = next((shot.start for shot in shots if shot.start > onset and shot.dose >= .55), offset)
+    if by_phase:
+        peak_accents = iter(("breath", "prism", "portal", "iris"))
+        next_accent = peak
+        for shot in shots:
+            if shot.dose >= .7 and shot.start >= next_accent and not shot.effect:
+                shot.effect = next(peak_accents, "")
+                shot.confidence = .88
+                next_accent = shot.end + 2
+    if strong:
+        # Keep the spoken cues and add visual accents to otherwise untreated high-dose shots.
+        fallback = ("prism", "breath", "iris", "prism")
+        next_effect = 0
+        for shot in shots:
+            if not shot.effect and shot.dose >= .45:
+                shot.effect = fallback[next_effect % len(fallback)]
+                shot.confidence = .85
+                next_effect += 1
     streams = json.loads(subprocess.check_output(["ffprobe","-v","error","-show_streams",
                                                    "-of","json",str(source)]))["streams"]
     video = next(s for s in streams if s["codec_type"] == "video" and not s["disposition"]["attached_pic"])
@@ -225,6 +290,8 @@ def render(source, description, output):
             ax, ay = (.34,.72) if kind == "fossil" else (.5,.47)
             active = start <= t < end
             strength = accent(kind, u, dose) * shot.confidence if active else 0.
+            if strong:
+                strength = min(1., 1.6 * strength)
             v = float(energy[min(round(100*t),len(energy)-1)])
             src = np.frombuffer(raw,np.uint8).reshape(H,W,3)
             past.append(src)
@@ -315,6 +382,13 @@ def render(source, description, output):
             if short_tail and state == "crash" and t >= shots[-1].end:
                 # Hold the night grade across the encoder tail, then fade to black.
                 frame = cv.convertScaleAbs(palette(src,NIGHT), alpha=max(0,1-(t-shots[-1].end)/.60))
+            if continuous and onset <= t < offset:
+                fade = min(smooth((t-onset)/.65), smooth((offset-t)/.85))
+                level = fade * (.28 + .70 * dose)
+                if level > .001:
+                    frame = glitch(frame, past[0], t, level, v)
+            if by_phase and onset <= t < offset:
+                frame = phase_finish(frame, past[0], t, onset, peak, state, dose, v)
             encoder.stdin.write(frame.tobytes())
             frame_no += 1
             if frame_no%max(1,round(10*fps))==0:
@@ -328,10 +402,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source","description","output"):
         parser.add_argument(name,type=Path)
+    parser.add_argument("--strong", action="store_true",
+                        help="Boost accents and add effects to unassigned high-dose cues.")
+    style = parser.add_mutually_exclusive_group()
+    style.add_argument("--continuous", action="store_true",
+                        help="Layer continuous RGB separation and glitch bands across the active dose.")
+    style.add_argument("--by-phase", action="store_true",
+                       help="Use an entry glitch, peak optics, and a cool trailing comedown.")
     args = parser.parse_args()
     if args.output.resolve() in (args.source.resolve(), args.description.resolve()):
         parser.error("Choose a separate output MP4")
     with tempfile.TemporaryDirectory(dir=args.output.parent) as directory:
         temporary = Path(directory) / "render.mp4"
-        render(args.source, args.description, temporary)
+        render(args.source, args.description, temporary,
+               strong=args.strong, continuous=args.continuous, by_phase=args.by_phase)
         temporary.replace(args.output)
